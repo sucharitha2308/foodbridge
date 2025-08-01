@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Dashboard - FoodBridge</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    <style>
+        .camera-section { display: none; margin-top: 15px; border: 2px dashed #f8b500; padding: 10px; border-radius: 10px; }
+        #camera-view { width: 100%; border-radius: 8px; margin-bottom: 10px; }
+        #photo-preview { max-width: 200px; margin-top: 10px; border-radius: 8px; border: 2px solid #ddd; }
+        #places-list .place-item { background: #fdfdfd; border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; }
+        #places-list .place-item:hover { background-color: #fff8e1; }
+    </style>
+</head>
+<body>
+    <div id="toast-box" class="toast-notification"></div>
+
+    <div class="container">
+        <div class="header">
+            <h1 id="welcome-message">Welcome, Donor!</h1>
+            <button id="logout-btn" class="btn btn-logout">Logout</button>
+        </div>
+
+        <div class="dashboard-content mt-20">
+            <div class="dashboard-form">
+                <h3>Submit a New Donation</h3>
+                <form id="donation-form">
+                    <div id="form-message-box"></div>
+                    <div class="form-group">
+                        <label for="foodName">Food Name</label>
+                        <input type="text" id="foodName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="quantity">Quantity</label>
+                        <input type="text" id="quantity" required>
+                    </div>
+                    <div class="form-group">
+                         <label>Photo of the Food</label>
+                         <button type="button" id="start-camera-btn" class="btn">Take Photo</button>
+                         <div class="camera-section" id="camera-container">
+                             <video id="camera-view" autoplay></video>
+                             <button type="button" id="capture-btn" class="btn btn-submit">Capture Image</button>
+                         </div>
+                         <img id="photo-preview" src="" alt="Your captured photo will appear here.">
+                         <canvas id="photo-canvas" style="display:none;"></canvas>
+                         <input type="hidden" id="photo-data">
+                    </div>
+                    <div class="form-group">
+                        <label for="deliveryMode">Delivery Method</label>
+                        <select id="deliveryMode" required>
+                            <option value="volunteer-collect">A volunteer will collect it</option>
+                            <option value="user-donate">I will go and donate it myself</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-submit">Submit</button>
+                </form>
+
+                <div id="places-container" style="display:none;">
+                    <h3>Nearby Drop-off Locations</h3>
+                    <p>Click a location below to see the route on the map.</p>
+                    <div id="places-list"></div>
+                </div>
+            </div>
+
+            <div class="donation-list">
+                <h3>Your Donation History</h3>
+                <div id="donations-container">
+                    <p>Loading your donations...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div id="map" class="mt-20"></div>
+
+    </div>
+
+    <script>
+        // --- Global Variables ---
+        const welcomeMessage = document.getElementById('welcome-message');
+        const logoutBtn = document.getElementById('logout-btn');
+        const donationForm = document.getElementById('donation-form');
+        const formMessageBox = document.getElementById('form-message-box');
+        const donationsContainer = document.getElementById('donations-container');
+        const placesContainer = document.getElementById('places-container');
+        const placesList = document.getElementById('places-list');
+        
+        let currentUser = null;
+        let map;
+        let routingControl = null;
+        let knownDonationStatuses = new Map();
+        let userLocation = null;
+
+        const nearbyPlaces = [
+            { name: "Amaravati Senior Care", lat: 16.5162, lon: 80.6580, type: "Old-Age Home" },
+            { name: "New Life Children's Home", lat: 16.5000, lon: 80.6400, type: "Orphanage" },
+            { name: "Amaralingeswara Swamy Temple", lat: 16.5745, lon: 80.3582, type: "Temple" }
+        ];
+
+        // --- Initialization and Utility Functions ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch('/api/dashboard/me');
+                if (!res.ok) throw new Error('Not logged in');
+                currentUser = await res.json();
+                welcomeMessage.textContent = `Welcome, ${currentUser.name}!`;
+                
+                initializeMap();
+                await loadDonationHistory();
+                setInterval(loadDonationHistory, 15000);
+            } catch (error) {
+                window.location.href = '/login-user.html';
+            }
+        });
+
+        function initializeMap() {
+            map = L.map('map').setView([16.5062, 80.6480], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        }
+
+        // --- Core Logic ---
+        function showRoutesToCharities() {
+            formMessageBox.innerHTML = `<div class="message message-success">Showing nearby drop-off locations.</div>`;
+            placesContainer.style.display = 'block';
+            placesList.innerHTML = ''; // Clear previous list
+
+            // Clear map layers
+            if (routingControl) map.removeControl(routingControl);
+            map.eachLayer(layer => {
+                if (layer instanceof L.Marker) map.removeLayer(layer);
+            });
+
+            navigator.geolocation.getCurrentPosition(position => {
+                userLocation = L.latLng(position.coords.latitude, position.coords.longitude);
+                map.setView(userLocation, 13);
+                
+                // Add user's location marker
+                L.marker(userLocation, {
+                    icon: L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] })
+                }).addTo(map).bindPopup('Your Location');
+
+                // Populate list and map markers for places
+                nearbyPlaces.forEach(place => {
+                    const placeLatLng = L.latLng(place.lat, place.lon);
+                    
+                    // Add to list
+                    const placeItem = document.createElement('div');
+                    placeItem.className = 'place-item';
+                    placeItem.textContent = `${place.name} (${place.type})`;
+                    placeItem.onclick = () => drawRouteToLocation(userLocation, placeLatLng);
+                    placesList.appendChild(placeItem);
+
+                    // Add to map
+                    L.marker(placeLatLng).addTo(map).bindPopup(place.name);
+                });
+            }, () => alert("Could not get your location. Please enable location services."));
+        }
+        
+        function drawRouteToLocation(startLatLng, endLatLng) {
+            if (routingControl) {
+                map.removeControl(routingControl);
+            }
+            routingControl = L.Routing.control({
+                waypoints: [startLatLng, endLatLng],
+                routeWhileDragging: true
+            }).addTo(map);
+        }
+
+        // --- Event Listeners and other functions from previous steps ---
+        // (Donation submission, camera logic, logout, etc. remain the same)
+        const startCameraBtn = document.getElementById('start-camera-btn');
+        const cameraContainer = document.getElementById('camera-container');
+        const cameraView = document.getElementById('camera-view');
+        const captureBtn = document.getElementById('capture-btn');
+        const photoCanvas = document.getElementById('photo-canvas');
+        const photoPreview = document.getElementById('photo-preview');
+        const photoDataInput = document.getElementById('photo-data');
+        let stream;
+        
+        async function loadDonationHistory() { /* This function remains the same as before */ }
+        function showToast(message) { /* This function remains the same as before */ }
+        startCameraBtn.addEventListener('click', async () => { /* This function remains the same as before */ });
+        captureBtn.addEventListener('click', () => { /* This function remains the same as before */ });
+        donationForm.addEventListener('submit', (e) => { e.preventDefault(); document.getElementById('deliveryMode').value === 'user-donate' ? showRoutesToCharities() : submitDonationForPickup(); });
+        logoutBtn.addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.href = '/index.html'; });
+        function submitDonationForPickup() { /* This function remains the same as before */ }
+
+        // Duplicating these functions here to ensure completeness
+        function showToast(message) { const toastBox = document.getElementById('toast-box'); toastBox.textContent = message; toastBox.style.opacity = '1'; toastBox.style.top = '20px'; setTimeout(() => { toastBox.style.opacity = '0'; toastBox.style.top = '-50px'; }, 5000); }
+        async function loadDonationHistory() { try { const res = await fetch('/api/dashboard/user-donations'); const donations = await res.json(); donationsContainer.innerHTML = ''; if (donations.length === 0) { donationsContainer.innerHTML = '<p>You have not made any donations yet.</p>'; return; } donations.forEach(d => { const oldStatus = knownDonationStatuses.get(d._id); const newStatus = d.status; if (newStatus === 'Pending Pickup' && oldStatus !== 'Pending Pickup') { showToast(`A volunteer is on their way to collect your ${d.foodName}!`); } knownDonationStatuses.set(d._id, newStatus); const item = document.createElement('div'); item.className = 'donation-item'; item.innerHTML = `<p><strong>Food:</strong> ${d.foodName}</p><p><strong>Status:</strong> ${d.status}</p><p><strong>Date:</strong> ${new Date(d.createdAt).toLocaleDateString()}</p>`; donationsContainer.appendChild(item); }); } catch (error) { donationsContainer.innerHTML = '<p>Could not load donations.</p>'; } }
+        startCameraBtn.addEventListener('click', async () => { cameraContainer.style.display = 'block'; try { stream = await navigator.mediaDevices.getUserMedia({ video: true }); cameraView.srcObject = stream; } catch (err) { alert("Could not access camera."); cameraContainer.style.display = 'none'; } });
+        captureBtn.addEventListener('click', () => { const context = photoCanvas.getContext('2d'); photoCanvas.width = cameraView.videoWidth; photoCanvas.height = cameraView.videoHeight; context.drawImage(cameraView, 0, 0, photoCanvas.width, photoCanvas.height); const dataUrl = photoCanvas.toDataURL('image/jpeg'); photoPreview.src = dataUrl; photoDataInput.value = dataUrl; stream.getTracks().forEach(track => track.stop()); cameraContainer.style.display = 'none'; });
+        function submitDonationForPickup() { formMessageBox.innerHTML = ''; const photoData = photoDataInput.value; if (!photoData) { formMessageBox.innerHTML = `<div class="message message-error">Please take a photo of the food.</div>`; return; } navigator.geolocation.getCurrentPosition(async (position) => { const donationData = { foodName: document.getElementById('foodName').value, quantity: document.getElementById('quantity').value, photo: photoData, deliveryMode: 'volunteer-collect', pickupAddress: currentUser.address, location: { type: 'Point', coordinates: [position.coords.longitude, position.coords.latitude] } }; try { const res = await fetch('/api/dashboard/submit-donation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(donationData) }); const data = await res.json(); if(res.ok){ formMessageBox.innerHTML = `<div class="message message-success">Donation submitted successfully! It is now visible to volunteers.</div>`; donationForm.reset(); photoPreview.src = ''; photoDataInput.value = ''; loadDonationHistory(); } else { formMessageBox.innerHTML = `<div class="message message-error">${data.message}</div>`; } } catch(error) { formMessageBox.innerHTML = `<div class="message message-error">Server error.</div>`; } }, () => { formMessageBox.innerHTML = `<div class="message message-error">Could not get your location. Please enable location services.</div>`; }); }
+    </script>
+</body>
+</html>

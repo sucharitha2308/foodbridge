@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Login - FoodBridge</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="form-section">
+        <h2>Donor Login</h2>
+        <form id="login-form">
+            <div id="message-box"></div>
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="btn btn-user-login">Login</button>
+        </form>
+        <p class="text-center mt-20"><a href="/forgot-password.html">Forgot Password?</a></p>
+        <p class="text-center mt-20">Don't have an account? <a href="/register-user.html">Register here</a></p>
+    </div>
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const messageBox = document.getElementById('message-box');
+            const formData = {
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value,
+                role: 'user'
+            };
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    window.location.href = '/user-dashboard.html';
+                } else {
+                    messageBox.innerHTML = `<div class="message message-error">${data.message}</div>`;
+                }
+            } catch (error) {
+                 messageBox.innerHTML = `<div class="message message-error">An error occurred. Please try again.</div>`;
+            }
+        });
+    </script>
+</body>
+</html>

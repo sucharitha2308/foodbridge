@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register as User - FoodBridge</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="form-section">
+        <h2>Register as a Donor</h2>
+        <form id="register-form">
+            <div id="message-box"></div>
+            <div class="form-group">
+                <label for="name">Full Name</label>
+                <input type="text" id="name" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+             <div class="form-group">
+                <label for="address">Full Address</label>
+                <input type="text" id="address" name="address" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <div class="form-group">
+                <label for="confirmPassword">Confirm Password</label>
+                <input type="password" id="confirmPassword" name="confirmPassword" required>
+            </div>
+            <div class="form-group">
+                <label for="hintQuestion">Security Question</label>
+                <select id="hintQuestion" name="hintQuestion" required>
+                    <option value="">-- Select a Question --</option>
+                    <option value="What was your first pet's name?">What was your first pet's name?</option>
+                    <option value="What is your mother's maiden name?">What is your mother's maiden name?</option>
+                    <option value="What city were you born in?">What city were you born in?</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="hintAnswer">Security Answer</label>
+                <input type="text" id="hintAnswer" name="hintAnswer" required>
+            </div>
+            <button type="submit" class="btn btn-submit">Register</button>
+        </form>
+        <p class="text-center mt-20">Already have an account? <a href="/login-user.html">Login here</a></p>
+    </div>
+
+    <script>
+        const form = document.getElementById('register-form');
+        const messageBox = document.getElementById('message-box');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (password !== confirmPassword) {
+                messageBox.innerHTML = `<div class="message message-error">Passwords do not match!</div>`;
+                return;
+            }
+
+            const formData = {
+                name: document.getElementById('name').value,
+                email: document.getElementById('email').value,
+                password: password,
+                address: document.getElementById('address').value,
+                hintQuestion: document.getElementById('hintQuestion').value,
+                hintAnswer: document.getElementById('hintAnswer').value,
+                role: 'user'
+            };
+
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    messageBox.innerHTML = `<div class="message message-success">${data.message} Redirecting to dashboard...</div>`;
+                    setTimeout(() => {
+                        window.location.href = '/user-dashboard.html';
+                    }, 2000);
+                } else {
+                    messageBox.innerHTML = `<div class="message message-error">${data.message}</div>`;
+                }
+            } catch (error) {
+                messageBox.innerHTML = `<div class="message message-error">An error occurred. Please try again.</div>`;
+            }
+        });
+    </script>
+</body>
+</html>

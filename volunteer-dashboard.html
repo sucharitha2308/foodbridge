@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Volunteer Dashboard - FoodBridge</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    <style>
+        #donations-container .place-item { background: #fdfdfd; border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; }
+        #donations-container .place-item:hover { background-color: #e8f5e9; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 id="welcome-message">Welcome, Volunteer!</h1>
+            <button id="logout-btn" class="btn btn-logout">Logout</button>
+        </div>
+        
+        <div id="map"></div>
+        
+        <div class="donation-list mt-20">
+            <h3 id="list-title">Available Donations</h3>
+            <div id="donations-container">
+                <p>Loading available donations...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const welcomeMessage = document.getElementById('welcome-message');
+        const logoutBtn = document.getElementById('logout-btn');
+        const donationsContainer = document.getElementById('donations-container');
+        const listTitle = document.getElementById('list-title');
+        
+        let currentUser = null;
+        let map;
+        let routingControl = null;
+        let markersLayer = L.layerGroup();
+        
+        const nearbyPlaces = [
+            { name: "Amaravati Senior Care", lat: 16.5162, lon: 80.6580, type: "Old-Age Home" },
+            { name: "New Life Children's Home", lat: 16.5000, lon: 80.6400, type: "Orphanage" },
+            { name: "Amaralingeswara Swamy Temple", lat: 16.5745, lon: 80.3582, type: "Temple" }
+        ];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch('/api/dashboard/me');
+                if (!res.ok) throw new Error('Not logged in');
+                currentUser = await res.json();
+                welcomeMessage.textContent = `Welcome, ${currentUser.name}!`;
+                
+                initializeMap();
+                loadAvailableDonations();
+                setInterval(loadAvailableDonations, 30000);
+            } catch (error) {
+                window.location.href = '/login-volunteer.html';
+            }
+        });
+
+        function initializeMap() {
+            map = L.map('map').setView([16.5062, 80.6480], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            markersLayer.addTo(map);
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    L.marker([pos.coords.latitude, pos.coords.longitude], { 
+                        icon: L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] }) 
+                    }).addTo(map).bindPopup('Your Location');
+                });
+            }
+        }
+
+        async function loadAvailableDonations() {
+            if (listTitle.textContent !== "Available Donations") return;
+            try {
+                const res = await fetch('/api/dashboard/available-donations');
+                const donations = await res.json();
+                donationsContainer.innerHTML = '';
+                markersLayer.clearLayers();
+
+                if (donations.length === 0) {
+                    donationsContainer.innerHTML = '<p>No available donations right now.</p>';
+                    return;
+                }
+
+                donations.forEach(d => {
+                    const item = document.createElement('div');
+                    item.className = 'donation-item';
+                    item.innerHTML = `<p><strong>Food:</strong> ${d.foodName} (${d.quantity})</p><p><strong>From:</strong> ${d.donorId.name}</p>`;
+                    const acceptButton = document.createElement('button');
+                    acceptButton.className = 'btn btn-submit';
+                    acceptButton.textContent = 'Accept Donation';
+                    acceptButton.onclick = () => acceptDonation(d._id);
+                    item.appendChild(acceptButton);
+                    donationsContainer.appendChild(item);
+
+                    L.marker([d.location.coordinates[1], d.location.coordinates[0]]).addTo(markersLayer).bindPopup(`<b>${d.foodName}</b>`);
+                });
+            } catch (error) {
+                donationsContainer.innerHTML = '<p>Could not load donations.</p>';
+            }
+        }
+
+        async function acceptDonation(donationId) {
+            if (!confirm('Are you sure you want to accept this donation?')) return;
+            try {
+                const res = await fetch(`/api/dashboard/accept-donation/${donationId}`, { method: 'PUT' });
+                if (!res.ok) throw new Error('Failed to accept');
+                const donation = await res.json();
+                enterPickupMode(donation);
+            } catch (error) {
+                alert('Could not accept donation.');
+                loadAvailableDonations();
+            }
+        }
+        
+        function enterPickupMode(donation) {
+            listTitle.textContent = "Stage 1: Pickup Task";
+            donationsContainer.innerHTML = `<div class="donation-item"><p><strong>Pickup:</strong> ${donation.foodName}</p><p><strong>At Address:</strong> ${donation.pickupAddress}</p></div>`;
+            const pickupButton = document.createElement('button');
+            pickupButton.className = 'btn btn-submit mt-20';
+            pickupButton.textContent = 'I Have Picked Up the Food';
+            pickupButton.onclick = () => enterDeliveryMode(donation);
+            donationsContainer.appendChild(pickupButton);
+            
+            markersLayer.clearLayers();
+            if (routingControl) map.removeControl(routingControl);
+
+            navigator.geolocation.getCurrentPosition(pos => {
+                routingControl = L.Routing.control({
+                    waypoints: [ L.latLng(pos.coords.latitude, pos.coords.longitude), L.latLng(donation.location.coordinates[1], donation.location.coordinates[0]) ],
+                    routeWhileDragging: true,
+                    lineOptions: { styles: [{color: 'blue', opacity: 0.8, weight: 6}] }
+                }).addTo(map);
+            });
+        }
+
+        function enterDeliveryMode(donation) {
+            listTitle.textContent = "Stage 2: Deliver Food";
+            donationsContainer.innerHTML = '<p>Please select a location below to deliver the food.</p>';
+            if (routingControl) map.removeControl(routingControl);
+            markersLayer.clearLayers();
+
+            navigator.geolocation.getCurrentPosition(pos => {
+                const volunteerLatLng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+                L.marker(volunteerLatLng, { 
+                    icon: L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] }) 
+                }).addTo(markersLayer).bindPopup('Your Current Location');
+
+                nearbyPlaces.forEach(place => {
+                    const placeLatLng = L.latLng(place.lat, place.lon);
+                    
+                    const placeItem = document.createElement('div');
+                    placeItem.className = 'place-item';
+                    placeItem.textContent = `Deliver to ${place.name}`;
+                    placeItem.onclick = () => startDeliveryRoute(donation, volunteerLatLng, placeLatLng);
+                    donationsContainer.appendChild(placeItem);
+
+                    L.marker(placeLatLng).addTo(markersLayer).bindPopup(place.name);
+                });
+            });
+        }
+        
+        function startDeliveryRoute(donation, startLatLng, endLatLng){
+            if (routingControl) map.removeControl(routingControl);
+            markersLayer.clearLayers();
+
+            routingControl = L.Routing.control({
+                waypoints: [startLatLng, endLatLng],
+                routeWhileDragging: true,
+                lineOptions: { styles: [{color: 'green', opacity: 0.8, weight: 6}] }
+            }).addTo(map);
+            
+            listTitle.textContent = "Delivery in Progress";
+            donationsContainer.innerHTML = `<div class="donation-item"><p>Please follow the route on the map to complete the delivery.</p></div>`;
+            const completeButton = document.createElement('button');
+            completeButton.className = 'btn btn-submit mt-20';
+            completeButton.textContent = 'Mark as Delivered';
+            completeButton.onclick = () => completeDelivery(donation._id);
+            donationsContainer.appendChild(completeButton);
+        }
+
+        async function completeDelivery(donationId) {
+            try {
+                const res = await fetch(`/api/dashboard/complete-donation/${donationId}`, { method: 'PUT' });
+                if (!res.ok) throw new Error('Failed to complete');
+                
+                alert('Delivery completed! Thank you!');
+                if (routingControl) map.removeControl(routingControl);
+                listTitle.textContent = "Available Donations";
+                loadAvailableDonations();
+            } catch(error){
+                alert('There was an error completing the delivery.');
+            }
+        }
+
+        logoutBtn.addEventListener('click', async () => {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/index.html';
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>FoodBridge - Welcome</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <div class="welcome-section">
+        <div class="girl-container">
+            <img src="https://res.cloudinary.com/dto5amokc/image/upload/v1753696843/WhatsApp_Image_2025-07-28_at_15.24.27_822b2c09_e8s97m.jpg" alt="Animated Girl Namaskaram Pose" />
+        </div>
+        <div class="note-box">
+            <h1>Welcome to FoodBridge</h1>
+            <p>
+                A heartfelt platform where humanity connects. <br><br>
+                <strong>FoodBridge</strong> unites those who wish to donate food with kind-hearted volunteers and NGOs to serve the hungry. <br><br>
+                Join us in building a bridge of compassion and nourishment. ❤🍱
+            </p>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h2>Get Started</h2>
+        <div class="button-group">
+            <a href="login-user.html" class="btn btn-user-login">Login as User</a>
+            <a href="login-volunteer.html" class="btn btn-volunteer-login">Login as Volunteer</a>
+            <a href="register-user.html" class="btn btn-register-user">Register as User</a>
+            <a href="register-volunteer.html" class="btn btn-register-volunteer">Register as Volunteer</a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h2 class="text-center" style="color: #6d4c41;">Your Location</h2>
+        <div id="map"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const map = L.map('map').setView([16.5062, 80.6480], 13); // Default to Amaravati
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    map.setView([lat, lon], 14);
+                    L.marker([lat, lon]).addTo(map)
+                        .bindPopup('You are here!')
+                        .openPopup();
+                }, () => {
+                    console.warn('Geolocation permission denied. Showing default location.');
+                });
+            } else {
+                console.warn('Geolocation is not supported by this browser.');
+            }
+        });
+    </script>
+</body>
+</html>
